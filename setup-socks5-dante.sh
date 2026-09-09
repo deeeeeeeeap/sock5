@@ -95,7 +95,8 @@ proxy pass {
 EOF
 
 if command -v danted >/dev/null 2>&1; then
-  danted -t -f "$CONFIG" || die "Dante 配置校验失败"
+  # Dante 1.4.x uses -V for configuration verification (not -t).
+  danted -V -f "$CONFIG" || die "Dante 配置校验失败"
 fi
 
 if (( ! NO_FIREWALL )); then
