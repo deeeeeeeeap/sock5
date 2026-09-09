@@ -2,6 +2,12 @@
 
 脚本 [setup-socks5-dante.sh](./setup-socks5-dante.sh) 面向 Debian/Ubuntu（`apt-get`）以及 RHEL/Fedora（`dnf`/`yum`）服务器，使用 Dante 提供带用户名密码认证的 SOCKS5 服务。
 
+仓库已发布后，可直接在服务器执行一键命令（从 GitHub 拉取当前脚本）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/deeeeeeeeap/sock5/main/setup-socks5-dante.sh | sudo bash
+```
+
 ```bash
 chmod +x setup-socks5-dante.sh
 sudo ./setup-socks5-dante.sh
