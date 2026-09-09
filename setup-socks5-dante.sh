@@ -74,15 +74,24 @@ else
 fi
 printf '%s:%s\n' "$USERNAME" "$PASSWORD" | chpasswd
 
-CONFIG=/etc/danted.conf
+if [[ -r /etc/os-release ]] && . /etc/os-release && [[ "${ID:-}" == "ubuntu" || "${ID_LIKE:-}" == *debian* ]]; then
+  CONFIG=/etc/danted.conf
+else
+  CONFIG=/etc/sockd.conf
+fi
+if id proxy >/dev/null 2>&1; then
+  DANTE_PRIV_USER=proxy
+else
+  DANTE_PRIV_USER=root
+fi
 install -m 0600 /dev/null "$CONFIG"
 cat >"$CONFIG" <<EOF
 logoutput: syslog
 internal: 0.0.0.0 port = $PORT
 external: $EXTERNAL_IF
 socksmethod: username
-# Ubuntu's package creates the unprivileged "proxy" account for Dante.
-user.privileged: proxy
+# Ubuntu packages create "proxy"; other distributions may use root here.
+user.privileged: $DANTE_PRIV_USER
 user.notprivileged: nobody
 clientmethod: none
 
@@ -98,7 +107,13 @@ EOF
 
 if command -v danted >/dev/null 2>&1; then
   # Dante 1.4.x uses -V for configuration verification (not -t).
-  danted -V -f "$CONFIG" || die "Dante 配置校验失败"
+  VERIFY_OUTPUT=$(mktemp)
+  if ! danted -V -f "$CONFIG" >"$VERIFY_OUTPUT" 2>&1; then
+    cat "$VERIFY_OUTPUT" >&2
+    rm -f "$VERIFY_OUTPUT"
+    die "Dante 配置校验失败，请查看上面的具体错误"
+  fi
+  rm -f "$VERIFY_OUTPUT"
 fi
 
 if (( ! NO_FIREWALL )); then
