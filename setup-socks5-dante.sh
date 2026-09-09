@@ -80,14 +80,14 @@ cat >"$CONFIG" <<EOF
 logoutput: syslog
 internal: 0.0.0.0 port = $PORT
 external: $EXTERNAL_IF
-method: username
+socksmethod: username
 user.privileged: root
 user.notprivileged: nobody
 
 client pass {
   from: $ALLOWED_CIDR to: 0.0.0.0/0
 }
-proxy pass {
+socks pass {
   from: $ALLOWED_CIDR to: 0.0.0.0/0
   command: connect
   log: connect error
