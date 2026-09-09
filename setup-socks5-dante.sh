@@ -81,8 +81,10 @@ logoutput: syslog
 internal: 0.0.0.0 port = $PORT
 external: $EXTERNAL_IF
 socksmethod: username
-user.privileged: root
+# Ubuntu's package creates the unprivileged "proxy" account for Dante.
+user.privileged: proxy
 user.notprivileged: nobody
+clientmethod: none
 
 client pass {
   from: $ALLOWED_CIDR to: 0.0.0.0/0
