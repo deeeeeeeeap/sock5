@@ -7,8 +7,25 @@ set -Eeuo pipefail
 PORT=""
 USERNAME=""
 PASSWORD=""
+HOST=""
 NO_FIREWALL=0
 ALLOWED_CIDR="0.0.0.0/0"
+SHOW=0
+CREDENTIAL_FILE=/root/.config/socks5-node/credentials
+
+proxy_uri() {
+  local host="$1"
+  [[ "$host" == *:* && "$host" != \[*\] ]] && host="[$host]"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$USERNAME" "$PASSWORD" "$host" "$PORT" <<'PY'
+import sys, urllib.parse
+u, p, h, port = sys.argv[1:]
+print(f"socks5://{urllib.parse.quote(u, safe='')}:{urllib.parse.quote(p, safe='')}@{h}:{port}")
+PY
+  else
+    printf 'socks5://%s:%s@%s:%s\n' "$USERNAME" "$PASSWORD" "$host" "$PORT"
+  fi
+}
 
 usage() {
   cat <<'EOF'
@@ -18,6 +35,8 @@ usage() {
   --port PORT              监听端口（默认随机选择 20000-60000）
   --username NAME          代理用户名（默认随机生成）
   --password PASSWORD      代理密码（默认随机生成；避免出现在 shell 历史中）
+  --host HOST              输出连接地址中的公网 IP 或域名
+  --show                   显示已保存的现有代理信息（只读）
   --no-firewall            不尝试添加 ufw/firewalld 放行规则
   --allow CIDR             限制客户端来源网段（默认 0.0.0.0/0）
   -h, --help               显示帮助
@@ -35,6 +54,8 @@ while (($#)); do
     --port) [[ $# -ge 2 ]] || die "--port 需要参数"; PORT=$2; shift 2 ;;
     --username) [[ $# -ge 2 ]] || die "--username 需要参数"; USERNAME=$2; shift 2 ;;
     --password) [[ $# -ge 2 ]] || die "--password 需要参数"; PASSWORD=$2; shift 2 ;;
+    --host) [[ $# -ge 2 ]] || die "--host 需要参数"; HOST=$2; shift 2 ;;
+    --show) SHOW=1; shift ;;
     --no-firewall) NO_FIREWALL=1; shift ;;
     --allow) [[ $# -ge 2 ]] || die "--allow 需要参数"; ALLOWED_CIDR=$2; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -43,6 +64,13 @@ while (($#)); do
 done
 
 require_root
+if (( SHOW )); then
+  [[ -r "$CREDENTIAL_FILE" ]] || die "未找到已保存的代理凭据。旧版本安装未保存密码，请重新运行安装。"
+  . "$CREDENTIAL_FILE"
+  echo "服务状态: $(systemctl is-active danted 2>/dev/null || true)"
+  echo "SOCKS5 URI: $(proxy_uri "${PROXY_HOST:-服务器公网 IP}")"
+  exit 0
+fi
 [[ -n "$PORT" ]] || PORT=$((20000 + $(od -An -N2 -tu2 /dev/urandom) % 40001))
 [[ -n "$USERNAME" ]] || USERNAME="proxy$(random_hex 3)"
 [[ -n "$PASSWORD" ]] || PASSWORD="$(random_hex 12)"
@@ -79,10 +107,15 @@ if [[ -r /etc/os-release ]] && . /etc/os-release && [[ "${ID:-}" == "ubuntu" || 
 else
   CONFIG=/etc/sockd.conf
 fi
-if id proxy >/dev/null 2>&1; then
-  DANTE_PRIV_USER=proxy
-else
-  DANTE_PRIV_USER=root
+# Reuse an existing privileged account only when the current Dante config
+# explicitly declares one; merely having a system user named "proxy" is not
+# sufficient. On a clean install Dante's portable default is root.
+DANTE_PRIV_USER=root
+if [[ -f "$CONFIG" ]]; then
+  EXISTING_PRIV=$(awk -F: '/^[[:space:]]*user\.privileged[[:space:]]*:/ {gsub(/[[:space:]]/, "", $2); print $2; exit}' "$CONFIG")
+  if [[ -n "$EXISTING_PRIV" ]] && id "$EXISTING_PRIV" >/dev/null 2>&1; then
+    DANTE_PRIV_USER="$EXISTING_PRIV"
+  fi
 fi
 install -m 0600 /dev/null "$CONFIG"
 cat >"$CONFIG" <<EOF
@@ -129,10 +162,16 @@ sleep 1
 systemctl is-active --quiet "$SYSTEMD_UNIT" || { systemctl --no-pager --full status "$SYSTEMD_UNIT"; die "Dante 启动失败"; }
 
 SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+[[ -n "$HOST" ]] || HOST="$SERVER_IP"
+mkdir -p "${CREDENTIAL_FILE%/*}"
+chmod 700 "${CREDENTIAL_FILE%/*}"
+printf 'PORT=%q\nUSERNAME=%q\nPASSWORD=%q\nPROXY_HOST=%q\n' "$PORT" "$USERNAME" "$PASSWORD" "$HOST" > "$CREDENTIAL_FILE"
+chmod 600 "$CREDENTIAL_FILE"
 echo
 echo "SOCKS5 已启动"
 echo "地址: ${SERVER_IP:-服务器公网 IP}:$PORT"
 echo "用户名: $USERNAME"
 echo "密码: $PASSWORD"
+echo "SOCKS5 URI: $(proxy_uri "${HOST:-服务器公网 IP}")"
 echo "配置文件: $CONFIG"
 echo "提示: 请同时在云厂商安全组放行 TCP/$PORT；完成后建议保存并清理终端历史中的密码参数。"
